@@ -39,6 +39,26 @@ CREATE TABLE IF NOT EXISTS audit_events (
   created_at timestamptz DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS review_tasks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  email_id uuid REFERENCES emails(id),
+  provider_msg_id text UNIQUE NOT NULL,
+  reason text NOT NULL DEFAULT 'low_confidence_or_high_risk',
+  from_addr text NOT NULL,
+  subject text,
+  draft text NOT NULL,
+  confidence numeric(5,2) DEFAULT 0,
+  citations jsonb DEFAULT '[]'::jsonb,
+  status varchar(16) NOT NULL DEFAULT 'pending',
+  reviewer text,
+  final_reply text,
+  reject_reason text,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_emails_provider_msg_id ON emails(provider_msg_id);
 CREATE INDEX IF NOT EXISTS idx_replies_email_id ON replies(email_id);
 CREATE INDEX IF NOT EXISTS idx_audit_events_email_id ON audit_events(email_id);
+CREATE INDEX IF NOT EXISTS idx_review_tasks_provider_msg_id ON review_tasks(provider_msg_id);
+CREATE INDEX IF NOT EXISTS idx_review_tasks_status ON review_tasks(status);

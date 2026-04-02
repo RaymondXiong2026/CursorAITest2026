@@ -59,9 +59,10 @@ services:
     env_file:
       - .env
     environment:
+      REVIEW_STORAGE: "postgres"
       DATABASE_URL: ${DATABASE_URL}
       AGENTMAIL_SEND_URL: ${REVIEW_AGENTMAIL_SEND_URL}
-      SEND_TIMEOUT_SECONDS: "20"
+      SEND_TIMEOUT_SECONDS: ${REVIEW_SEND_TIMEOUT_SECONDS}
     volumes:
       - ./review-service:/app
     ports:

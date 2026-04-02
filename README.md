@@ -4,7 +4,7 @@
 
 - `n8n/workflow.agentmail-inbox-zero.json`：Inbox Zero + RAG + 人工审核工作流
 - `rag-api/`：RAG API（支持可选 Ollama / LibreTranslate）
-- `review-service/`：人工审核服务（入队、列表、批准发送、拒绝）
+- `review-service/`：人工审核服务（入队、列表、批准发送、拒绝、审核页面）
 - `sql/init_agentmail_schema.sql`：数据库初始化脚本
 - `docker-compose.yml`：一键启动编排
 
@@ -45,6 +45,10 @@ docker compose up -d
    - `POST /review/tasks/{provider_msg_id}/approve`
 4. 审核拒绝：
    - `POST /review/tasks/{provider_msg_id}/reject`
+
+也可直接打开最小审核页面：
+
+- `http://localhost:8100/review/ui`
 
 ## 4) 无 Docker 单独运行
 
