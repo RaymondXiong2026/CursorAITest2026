@@ -1,0 +1,105 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: agentmail-postgres
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./sql/init_agentmail_schema.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: agentmail-qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  rag-api:
+    image: python:3.12-slim
+    container_name: agentmail-rag-api
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt &&
+      python -m uvicorn app:app --host 0.0.0.0 --port 8000"
+    env_file:
+      - .env
+    environment:
+      QDRANT_IN_MEMORY: ${RAG_QDRANT_IN_MEMORY}
+      QDRANT_URL: ${RAG_QDRANT_URL}
+      QDRANT_COLLECTION: "kb_chunks"
+      EMBEDDING_DIM: "384"
+      RAG_CONFIDENCE_THRESHOLD: ${RAG_CONFIDENCE_THRESHOLD}
+      LLM_PROVIDER: ${RAG_LLM_PROVIDER}
+      OLLAMA_BASE_URL: ${RAG_OLLAMA_BASE_URL}
+      OLLAMA_MODEL: ${RAG_OLLAMA_MODEL}
+      ENABLE_TRANSLATION: ${RAG_ENABLE_TRANSLATION}
+      LIBRETRANSLATE_URL: ${RAG_LIBRETRANSLATE_URL}
+    volumes:
+      - ./rag-api:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - qdrant
+
+  review-service:
+    image: python:3.12-slim
+    container_name: agentmail-review-service
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt &&
+      python -m uvicorn app:app --host 0.0.0.0 --port 8100"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      AGENTMAIL_SEND_URL: ${REVIEW_AGENTMAIL_SEND_URL}
+      SEND_TIMEOUT_SECONDS: "20"
+    volumes:
+      - ./review-service:/app
+    ports:
+      - "8100:8100"
+    depends_on:
+      - postgres
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: agentmail-n8n
+    ports:
+      - "5678:5678"
+    env_file:
+      - .env
+    environment:
+      N8N_HOST: "localhost"
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: "http"
+      WEBHOOK_URL: "http://localhost:5678/"
+      DB_TYPE: "postgresdb"
+      DB_POSTGRESDB_HOST: "postgres"
+      DB_POSTGRESDB_PORT: "5432"
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+      N8N_ENCRYPTION_KEY: "replace-with-your-random-key"
+      RAG_API_BASE_URL: ${RAG_API_BASE_URL}
+      AGENTMAIL_SEND_URL: ${AGENTMAIL_SEND_URL}
+      HUMAN_REVIEW_QUEUE_URL: ${HUMAN_REVIEW_QUEUE_URL}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n:/files/n8n:ro
+    depends_on:
+      - postgres
+      - rag-api
+      - review-service
+
+volumes:
+  pg_data:
+  qdrant_data:
+  n8n_data:

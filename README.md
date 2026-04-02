@@ -1,29 +1,68 @@
 # CursorAITest2026
 
-## Deliverables included
+完整本地闭环包含：
 
-- `n8n/workflow.agentmail-inbox-zero.json`  
-  Importable n8n workflow for AgentMail Inbox Zero orchestration.
-- `rag-api/`  
-  Minimal FastAPI + Qdrant RAG service used by the n8n workflow.
+- `n8n/workflow.agentmail-inbox-zero.json`：Inbox Zero + RAG + 人工审核工作流
+- `rag-api/`：RAG API（支持可选 Ollama / LibreTranslate）
+- `review-service/`：人工审核服务（入队、列表、批准发送、拒绝）
+- `sql/init_agentmail_schema.sql`：数据库初始化脚本
+- `docker-compose.yml`：一键启动编排
 
-## Quick start
+## 1) 一键启动（推荐）
+
+```bash
+cp .env.example .env
+docker compose up -d
+```
+
+服务端口：
+
+- n8n: `http://localhost:5678`
+- rag-api: `http://localhost:8000/health`
+- review-service: `http://localhost:8100/health`
+- qdrant: `http://localhost:6333`
+- postgres: `localhost:5432`
+
+## 2) n8n 导入工作流
+
+导入：
+
+- `n8n/workflow.agentmail-inbox-zero.json`
+
+工作流依赖环境变量（已在 compose 里注入）：
+
+- `RAG_API_BASE_URL`
+- `AGENTMAIL_SEND_URL`
+- `HUMAN_REVIEW_QUEUE_URL`
+
+## 3) 本地人工审核联调示例
+
+1. n8n 低置信度任务会推送到：
+   - `POST /review/queue`
+2. 查看待审核队列：
+   - `GET /review/tasks?status=pending`
+3. 审核通过并发送：
+   - `POST /review/tasks/{provider_msg_id}/approve`
+4. 审核拒绝：
+   - `POST /review/tasks/{provider_msg_id}/reject`
+
+## 4) 无 Docker 单独运行
+
+### rag-api
 
 ```bash
 cd rag-api
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 cp .env.example .env
-uvicorn app:app --reload --port 8000
+python3 -m uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
-Then import the n8n workflow JSON and set these env vars in n8n:
-
-- `RAG_API_BASE_URL=http://<your-rag-api-host>:8000`
-- `AGENTMAIL_SEND_URL=<your-agentmail-send-endpoint>`
-- `HUMAN_REVIEW_QUEUE_URL=<your-review-queue-endpoint>` (optional)
-
-Initialize database tables (recommended before running n8n workflow):
+### review-service
 
 ```bash
-psql "$DATABASE_URL" -f sql/init_agentmail_schema.sql
+cd review-service
+python3 -m pip install -r requirements.txt
+cp .env.example .env
+python3 -m uvicorn app:app --host 0.0.0.0 --port 8100
 ```
+
