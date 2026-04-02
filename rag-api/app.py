@@ -1,16 +1,20 @@
+import hashlib
 import os
 import uuid
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal
 
 from fastapi import FastAPI, HTTPException
 from langdetect import LangDetectException, detect
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
-from sentence_transformers import SentenceTransformer
+
+load_dotenv()
 
 
 CATEGORY_TYPE = Literal["auto_reply", "review", "escalate", "archive", "spam"]
+EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "384"))
 
 
 class DetectLanguageRequest(BaseModel):
@@ -87,13 +91,28 @@ class TranslateResponse(BaseModel):
 
 APP_NAME = "agentmail-rag-api"
 COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "kb_chunks")
-EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+QDRANT_IN_MEMORY = os.getenv("QDRANT_IN_MEMORY", "false").lower() == "true"
 
-app = FastAPI(title=APP_NAME, version="0.1.0")
-embedder = SentenceTransformer(EMBEDDING_MODEL_NAME)
-qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+app = FastAPI(title=APP_NAME, version="0.1.1")
+qdrant = QdrantClient(":memory:") if QDRANT_IN_MEMORY else QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+
+
+def _embed_text(text: str) -> List[float]:
+    if not text:
+        return [0.0] * EMBEDDING_DIM
+    vec = [0.0] * EMBEDDING_DIM
+    words = text.lower().split()
+    for token in words:
+        digest = hashlib.sha256(token.encode("utf-8")).digest()
+        for i in range(0, min(len(digest), EMBEDDING_DIM)):
+            value = digest[i] / 255.0
+            vec[i] += value
+    norm = sum(v * v for v in vec) ** 0.5
+    if norm == 0:
+        return vec
+    return [v / norm for v in vec]
 
 
 def _ensure_collection() -> None:
@@ -101,10 +120,9 @@ def _ensure_collection() -> None:
     if COLLECTION_NAME in existing:
         return
 
-    vector_size = len(embedder.encode("hello", normalize_embeddings=True))
     qdrant.create_collection(
         collection_name=COLLECTION_NAME,
-        vectors_config=models.VectorParams(size=vector_size, distance=models.Distance.COSINE),
+        vectors_config=models.VectorParams(size=EMBEDDING_DIM, distance=models.Distance.COSINE),
     )
 
 
@@ -173,7 +191,7 @@ def _classify(subject: str, body: str) -> ClassifyResponse:
 
 
 def _retrieve_chunks(query: str, limit: int = 5) -> List[Citation]:
-    vector = embedder.encode(query, normalize_embeddings=True).tolist()
+    vector = _embed_text(query)
     points = qdrant.search(
         collection_name=COLLECTION_NAME,
         query_vector=vector,
@@ -221,6 +239,7 @@ def _build_reply(question: str, language: str, citations: List[Citation]) -> str
 
 @app.on_event("startup")
 def startup() -> None:
+    # Ensure collection exists for first run in memory or external Qdrant.
     _ensure_collection()
 
 
@@ -247,7 +266,7 @@ def ingest(payload: IngestRequest) -> IngestResponse:
     points: List[models.PointStruct] = []
     for chunk in payload.chunks:
         chunk_id = str(uuid.uuid4())
-        vector = embedder.encode(chunk.content, normalize_embeddings=True).tolist()
+        vector = _embed_text(chunk.content)
         points.append(
             models.PointStruct(
                 id=chunk_id,

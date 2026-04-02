@@ -33,6 +33,7 @@
     },
     {
       "parameters": {
+        "method": "POST",
         "url": "={{$env.RAG_API_BASE_URL}}/detect-language",
         "sendBody": true,
         "specifyBody": "json",
@@ -78,6 +79,7 @@
     },
     {
       "parameters": {
+        "method": "POST",
         "url": "={{$env.RAG_API_BASE_URL}}/classify",
         "sendBody": true,
         "specifyBody": "json",
@@ -141,6 +143,7 @@
     },
     {
       "parameters": {
+        "method": "POST",
         "url": "={{$env.RAG_API_BASE_URL}}/rag/reply",
         "sendBody": true,
         "specifyBody": "json",
@@ -231,6 +234,7 @@
     },
     {
       "parameters": {
+        "method": "POST",
         "url": "={{$env.AGENTMAIL_SEND_URL}}",
         "sendBody": true,
         "specifyBody": "json",
