@@ -143,5 +143,5 @@ def reject_task(provider_msg_id: str, payload: RejectRequest) -> Dict[str, Any]:
 
 @app.post("/mock/agentmail/send")
 def mock_agentmail_send(payload: Dict[str, Any]) -> Dict[str, Any]:
-    # Local integration test endpoint used by docker-compose default env.
+    # Local integration test endpoint used by docker-compose/default local env.
     return {"ok": True, "accepted": True, "echo": payload}
