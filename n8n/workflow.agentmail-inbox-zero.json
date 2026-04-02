@@ -1,5 +1,5 @@
 {
-  "name": "AgentMail Inbox Zero + RAG",
+  "name": "AgentMail Inbox Zero + RAG + Review Queue",
   "nodes": [
     {
       "parameters": {
@@ -20,7 +20,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const payload = $json.body ?? $json;\n\nreturn [{\n  json: {\n    provider_msg_id: payload.provider_msg_id ?? payload.message_id ?? payload.id ?? '',\n    thread_id: payload.thread_id ?? '',\n    from_addr: payload.from ?? payload.from_addr ?? '',\n    to_addr: payload.to ?? payload.to_addr ?? '',\n    subject: payload.subject ?? '',\n    body_text: payload.body_text ?? payload.text ?? '',\n    body_html: payload.body_html ?? payload.html ?? '',\n    received_at: payload.received_at ?? new Date().toISOString()\n  }\n}];"
+        "jsCode": "const payload = $json.body ?? $json;\n\nconst email = {\n  provider_msg_id: payload.provider_msg_id ?? payload.message_id ?? payload.id ?? '',\n  thread_id: payload.thread_id ?? '',\n  from_addr: payload.from ?? payload.from_addr ?? '',\n  to_addr: payload.to ?? payload.to_addr ?? '',\n  subject: payload.subject ?? '',\n  body_text: payload.body_text ?? payload.text ?? '',\n  body_html: payload.body_html ?? payload.html ?? '',\n  received_at: payload.received_at ?? new Date().toISOString(),\n};\n\nreturn [{ json: email }];"
       },
       "id": "Normalize_Email",
       "name": "Normalize Email",
@@ -33,11 +33,32 @@
     },
     {
       "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO emails (\n  provider_msg_id,\n  thread_id,\n  from_addr,\n  to_addr,\n  subject,\n  body_text,\n  body_html,\n  status,\n  created_at,\n  updated_at\n)\nVALUES (\n  '{{ $json.provider_msg_id.replace(/''/g, '''''') }}',\n  '{{ $json.thread_id.replace(/''/g, '''''') }}',\n  '{{ $json.from_addr.replace(/''/g, '''''') }}',\n  '{{ $json.to_addr.replace(/''/g, '''''') }}',\n  '{{ $json.subject.replace(/''/g, '''''') }}',\n  '{{ $json.body_text.replace(/''/g, '''''') }}',\n  '{{ $json.body_html.replace(/''/g, '''''') }}',\n  'received',\n  NOW(),\n  NOW()\n)\nON CONFLICT (provider_msg_id) DO UPDATE SET\n  thread_id = EXCLUDED.thread_id,\n  from_addr = EXCLUDED.from_addr,\n  to_addr = EXCLUDED.to_addr,\n  subject = EXCLUDED.subject,\n  body_text = EXCLUDED.body_text,\n  body_html = EXCLUDED.body_html,\n  updated_at = NOW();",
+        "options": {}
+      },
+      "id": "Upsert_Email",
+      "name": "Upsert Email",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        660,
+        280
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "replace-postgres-credential-id",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "={{$env.RAG_API_BASE_URL}}/detect-language",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"text\": $json.body_text\n}",
+        "jsonBody": "={\"text\": $json.body_text}",
         "options": {}
       },
       "id": "Detect_Language",
@@ -45,7 +66,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        660,
+        890,
         280
       ]
     },
@@ -60,20 +81,20 @@
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.2,
       "position": [
-        890,
+        1120,
         280
       ]
     },
     {
       "parameters": {
-        "jsCode": "const data = $json;\nreturn [{\n  json: {\n    ...data,\n    detected_lang: data.lang || 'unknown'\n  }\n}];"
+        "jsCode": "const data = $json;\nreturn [{ json: { ...data, detected_lang: data.lang || 'unknown' } }];"
       },
       "id": "Attach_Language",
       "name": "Attach Language",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1120,
+        1350,
         280
       ]
     },
@@ -83,7 +104,7 @@
         "url": "={{$env.RAG_API_BASE_URL}}/classify",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"subject\": $json.subject,\n  \"body_text\": $json.body_text,\n  \"lang\": $json.detected_lang\n}",
+        "jsonBody": "={\"subject\": $json.subject, \"body_text\": $json.body_text, \"lang\": $json.detected_lang}",
         "options": {}
       },
       "id": "Classify_Inbox_Zero",
@@ -91,7 +112,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1360,
+        1580,
         280
       ]
     },
@@ -106,9 +127,30 @@
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.2,
       "position": [
-        1590,
+        1810,
         280
       ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE emails\nSET\n  detected_lang = '{{ $json.detected_lang }}',\n  category = '{{ $json.category }}',\n  priority = '{{ $json.priority }}',\n  risk_score = {{ $json.risk_score }},\n  status = 'processing',\n  updated_at = NOW()\nWHERE provider_msg_id = '{{ $json.provider_msg_id.replace(/''/g, '''''') }}';",
+        "options": {}
+      },
+      "id": "Update_Email_Classification",
+      "name": "Update Email Classification",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2040,
+        280
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "replace-postgres-credential-id",
+          "name": "Postgres"
+        }
+      }
     },
     {
       "parameters": {
@@ -137,7 +179,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1830,
+        2270,
         280
       ]
     },
@@ -147,7 +189,7 @@
         "url": "={{$env.RAG_API_BASE_URL}}/rag/reply",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"subject\": $json.subject,\n  \"question\": $json.body_text,\n  \"customer_language\": $json.detected_lang,\n  \"max_chunks\": 5\n}",
+        "jsonBody": "={\"subject\": $json.subject, \"question\": $json.body_text, \"customer_language\": $json.detected_lang, \"max_chunks\": 5}",
         "options": {}
       },
       "id": "Generate_RAG_Reply",
@@ -155,8 +197,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2050,
-        200
+        2500,
+        180
       ]
     },
     {
@@ -170,9 +212,30 @@
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.2,
       "position": [
-        2280,
-        200
+        2730,
+        180
       ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO replies (\n  email_id,\n  draft_text,\n  confidence,\n  citations,\n  review_required,\n  created_at\n)\nSELECT\n  e.id,\n  '{{ $json.reply.replace(/''/g, '''''') }}',\n  {{ $json.confidence }},\n  '{{ JSON.stringify($json.citations).replace(/''/g, '''''') }}'::jsonb,\n  {{ $json.review_required ? 'true' : 'false' }},\n  NOW()\nFROM emails e\nWHERE e.provider_msg_id = '{{ $json.provider_msg_id.replace(/''/g, '''''') }}';",
+        "options": {}
+      },
+      "id": "Insert_Reply_Draft",
+      "name": "Insert Reply Draft",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2960,
+        180
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "replace-postgres-credential-id",
+          "name": "Postgres"
+        }
+      }
     },
     {
       "parameters": {
@@ -202,34 +265,73 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        2510,
-        200
+        3190,
+        180
       ]
     },
     {
       "parameters": {
-        "jsCode": "return [{\n  json: {\n    action: 'queue_for_human_review',\n    reason: 'low_confidence_or_high_risk',\n    email: {\n      provider_msg_id: $json.provider_msg_id,\n      from_addr: $json.from_addr,\n      subject: $json.subject\n    },\n    draft: $json.reply,\n    confidence: $json.confidence,\n    citations: $json.citations\n  }\n}];"
+        "jsCode": "return [{\n  json: {\n    action: 'queue_for_human_review',\n    reason: 'low_confidence_or_high_risk',\n    provider_msg_id: $json.provider_msg_id,\n    from_addr: $json.from_addr,\n    subject: $json.subject,\n    draft: $json.reply,\n    confidence: $json.confidence,\n    citations: $json.citations\n  }\n}];"
       },
       "id": "Build_Review_Payload",
       "name": "Build Review Payload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2740,
-        120
+        3420,
+        100
       ]
     },
     {
       "parameters": {
-        "jsCode": "return [{\n  json: {\n    action: 'auto_send',\n    to: $json.from_addr,\n    subject: `Re: ${$json.subject || ''}`,\n    body_text: $json.reply,\n    citations: $json.citations,\n    confidence: $json.confidence\n  }\n}];"
+        "method": "POST",
+        "url": "={{$env.HUMAN_REVIEW_QUEUE_URL}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{$json}}",
+        "options": {}
+      },
+      "id": "Send_Review_Queue",
+      "name": "Send Review Queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3650,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE emails\nSET status = 'review', updated_at = NOW()\nWHERE provider_msg_id = '{{ $json.provider_msg_id.replace(/''/g, '''''') }}';",
+        "options": {}
+      },
+      "id": "Mark_Review_Queued",
+      "name": "Mark Review Queued",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3650,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "replace-postgres-credential-id",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    action: 'auto_send',\n    provider_msg_id: $json.provider_msg_id,\n    to: $json.from_addr,\n    subject: `Re: ${$json.subject || ''}`,\n    body_text: $json.reply,\n    citations: $json.citations,\n    confidence: $json.confidence\n  }\n}];"
       },
       "id": "Build_Send_Payload",
       "name": "Build Send Payload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2740,
-        280
+        3420,
+        260
       ]
     },
     {
@@ -246,14 +348,69 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2970,
-        280
+        3650,
+        260
       ]
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO audit_events(email_id, event_type, payload)\nVALUES (\n  NULL,\n  'agentmail_workflow_result',\n  '{{ JSON.stringify($json).replace(/''/g, '''''') }}'::jsonb\n);",
+        "query": "UPDATE emails\nSET status = 'replied', updated_at = NOW()\nWHERE provider_msg_id = '{{ $json.provider_msg_id.replace(/''/g, '''''') }}';",
+        "options": {}
+      },
+      "id": "Mark_Replied",
+      "name": "Mark Replied",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3880,
+        260
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "replace-postgres-credential-id",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    category: $json.category,\n    action: 'not_auto_reply',\n    reason: 'classified_as_non_auto_reply',\n    provider_msg_id: $json.provider_msg_id,\n    from_addr: $json.from_addr,\n    subject: $json.subject\n  }\n}];"
+      },
+      "id": "Build_NonAuto_Payload",
+      "name": "Build NonAuto Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2500,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE emails\nSET status = 'closed', updated_at = NOW()\nWHERE provider_msg_id = '{{ $json.provider_msg_id.replace(/''/g, '''''') }}';",
+        "options": {}
+      },
+      "id": "Mark_Closed",
+      "name": "Mark Closed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2730,
+        360
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "replace-postgres-credential-id",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_events(email_id, event_type, payload, created_at)\nSELECT\n  e.id,\n  'agentmail_workflow_result',\n  '{{ JSON.stringify($json).replace(/''/g, '''''') }}'::jsonb,\n  NOW()\nFROM emails e\nWHERE e.provider_msg_id = '{{ ($json.provider_msg_id || ($json.email && $json.email.provider_msg_id) || '').replace(/''/g, '''''') }}';",
         "options": {}
       },
       "id": "Audit_Log",
@@ -261,8 +418,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        3200,
-        200
+        4110,
+        180
       ],
       "credentials": {
         "postgres": {
@@ -281,21 +438,8 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.4,
       "position": [
-        3430,
-        200
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "return [{\n  json: {\n    category: $json.category,\n    action: 'not_auto_reply',\n    reason: 'classified_as_non_auto_reply',\n    from_addr: $json.from_addr,\n    subject: $json.subject\n  }\n}];"
-      },
-      "id": "Build_NonAuto_Payload",
-      "name": "Build NonAuto Payload",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        2050,
-        360
+        4340,
+        180
       ]
     }
   ],
@@ -316,12 +460,23 @@
       "main": [
         [
           {
-            "node": "Detect Language",
+            "node": "Upsert Email",
             "type": "main",
             "index": 0
           },
           {
             "node": "Merge Normalized + Lang",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Email": {
+      "main": [
+        [
+          {
+            "node": "Detect Language",
             "type": "main",
             "index": 0
           }
@@ -381,6 +536,17 @@
       "main": [
         [
           {
+            "node": "Update Email Classification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Email Classification": {
+      "main": [
+        [
+          {
             "node": "IF Auto Reply",
             "type": "main",
             "index": 0
@@ -426,6 +592,17 @@
       "main": [
         [
           {
+            "node": "Insert Reply Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Reply Draft": {
+      "main": [
+        [
+          {
             "node": "IF Review Required",
             "type": "main",
             "index": 0
@@ -455,6 +632,33 @@
       "main": [
         [
           {
+            "node": "Send Review Queue",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Mark Review Queued",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Review Queue": {
+      "main": [
+        [
+          {
+            "node": "Mark Review Queued",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Review Queued": {
+      "main": [
+        [
+          {
             "node": "Audit Log",
             "type": "main",
             "index": 0
@@ -477,6 +681,17 @@
       "main": [
         [
           {
+            "node": "Mark Replied",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Replied": {
+      "main": [
+        [
+          {
             "node": "Audit Log",
             "type": "main",
             "index": 0
@@ -485,6 +700,17 @@
       ]
     },
     "Build NonAuto Payload": {
+      "main": [
+        [
+          {
+            "node": "Mark Closed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Closed": {
       "main": [
         [
           {
@@ -511,11 +737,11 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "agentmail-inbox-zero-v1",
+  "versionId": "agentmail-inbox-zero-v2",
   "meta": {
     "templateCredsSetupCompleted": false
   },
-  "id": "agentmail-inbox-zero-v1",
+  "id": "agentmail-inbox-zero-v2",
   "tags": [
     {
       "name": "agentmail"
@@ -525,6 +751,9 @@
     },
     {
       "name": "rag"
+    },
+    {
+      "name": "review-queue"
     }
   ]
 }

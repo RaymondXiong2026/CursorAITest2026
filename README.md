@@ -20,3 +20,10 @@ Then import the n8n workflow JSON and set these env vars in n8n:
 
 - `RAG_API_BASE_URL=http://<your-rag-api-host>:8000`
 - `AGENTMAIL_SEND_URL=<your-agentmail-send-endpoint>`
+- `HUMAN_REVIEW_QUEUE_URL=<your-review-queue-endpoint>` (optional)
+
+Initialize database tables (recommended before running n8n workflow):
+
+```bash
+psql "$DATABASE_URL" -f sql/init_agentmail_schema.sql
+```
