@@ -192,12 +192,13 @@ def _classify(subject: str, body: str) -> ClassifyResponse:
 
 def _retrieve_chunks(query: str, limit: int = 5) -> List[Citation]:
     vector = _embed_text(query)
-    points = qdrant.search(
+    result = qdrant.query_points(
         collection_name=COLLECTION_NAME,
-        query_vector=vector,
+        query=vector,
         limit=limit,
         with_payload=True,
     )
+    points = result.points
 
     citations: List[Citation] = []
     for p in points:
