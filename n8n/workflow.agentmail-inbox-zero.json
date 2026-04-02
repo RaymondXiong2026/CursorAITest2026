@@ -635,11 +635,6 @@
             "node": "Send Review Queue",
             "type": "main",
             "index": 0
-          },
-          {
-            "node": "Mark Review Queued",
-            "type": "main",
-            "index": 0
           }
         ]
       ]
